@@ -1,15 +1,21 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 
+# -------------------------------------------------
+# APP SETUP
+# -------------------------------------------------
 app = Flask(__name__)
 app.secret_key = "livvra_secret_key"
 
+# Allow frontend (Live Server / localhost) to use cookies
 CORS(app, supports_credentials=True)
 
 # -------------------------------------------------
-# TEMP IN-MEMORY USERS (DEV ONLY)
+# TEMP USER STORE (DEV ONLY)
 # -------------------------------------------------
+# NOTE: This resets when server restarts (OK for now)
 users = []
+
 admins = {
     "admin@livvra.com": {
         "email": "admin@livvra.com",
@@ -28,7 +34,7 @@ def find_user(email):
             return u
     return admins.get(email)
 
-def logged_in():
+def is_logged_in():
     return "email" in session
 
 # -------------------------------------------------
@@ -37,6 +43,9 @@ def logged_in():
 @app.route("/register", methods=["POST"])
 def register():
     data = request.json
+
+    if not data.get("email") or not data.get("password"):
+        return jsonify({"error": "Missing fields"}), 400
 
     if find_user(data["email"]):
         return jsonify({"error": "Email already exists"}), 400
@@ -48,6 +57,7 @@ def register():
         "last_name": data.get("last_name", "")
     })
 
+    # Frontend expects first_name / last_name
     return jsonify({
         "first_name": data.get("first_name", ""),
         "last_name": data.get("last_name", "")
@@ -59,9 +69,9 @@ def register():
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
-    user = find_user(data.get("email"))
 
-    if not user or user["password"] != data["password"]:
+    user = find_user(data.get("email"))
+    if not user or user["password"] != data.get("password"):
         return jsonify({"error": "Invalid credentials"}), 401
 
     session["email"] = user["email"]
@@ -80,11 +90,11 @@ def logout():
     return jsonify({"ok": True})
 
 # -------------------------------------------------
-# SESSION CHECK
+# SESSION CHECK  (VERY IMPORTANT FOR FRONTEND)
 # -------------------------------------------------
-@app.route("/me")
+@app.route("/me", methods=["GET"])
 def me():
-    if not logged_in():
+    if not is_logged_in():
         return jsonify({"logged_in": False})
 
     user = find_user(session["email"])
@@ -95,18 +105,21 @@ def me():
     })
 
 # -------------------------------------------------
-# PREDICT
+# PREDICTION
 # -------------------------------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
-    if not logged_in():
+    if not is_logged_in():
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.json
 
+    # Frontend sends these keys
     current_price = int(data["current_price"])
     years = int(data["years"])
+    sqft = data.get("sqft")  # accepted (even if unused)
 
+    # Stable appreciation logic (no ML yet)
     predicted = int(current_price * 1.12)
     percent = round(((predicted - current_price) / current_price) * 100)
 
@@ -132,7 +145,15 @@ def predict():
     })
 
 # -------------------------------------------------
+# ROOT (HEALTH CHECK)
+# -------------------------------------------------
+@app.route("/")
+def home():
+    return "Livvra Backend Running"
+
+# -------------------------------------------------
 # RUN
 # -------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
+    # TEMP IN-MEMORY USERS (DEV ONLY)
