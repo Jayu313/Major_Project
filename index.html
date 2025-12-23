@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Livvra – Real Estate Intelligence</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- React -->
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  #map { height: 400px; }
+</style>
+</head>
+
+<body class="bg-slate-900 text-white">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+const API = "http://127.0.0.1:5000";
+
+/* ---------------- CHART SAFE HANDLER ---------------- */
+let chartInstance = null;
+
+function drawChart(forecast) {
+  const canvas = document.getElementById("chart");
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  if (chartInstance) {
+    chartInstance.destroy();
+    chartInstance = null;
+  }
+
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: forecast.map((_, i) => `Year ${i + 1}`),
+      datasets: [{
+        label: "Price Forecast",
+        data: forecast,
+        borderColor: "#22c55e",
+        backgroundColor: "rgba(34,197,94,0.2)",
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false
+    }
+  });
+}
+
+/* ---------------- APP ---------------- */
+function App() {
+  const [user, setUser] = useState(null);
+  const [isLogin, setIsLogin] = useState(true);
+  const [auth, setAuth] = useState({ first_name:"", last_name:"", email:"", password:"" });
+  const [authError, setAuthError] = useState("");
+
+  const [showMap, setShowMap] = useState(false);
+  const [lat, setLat] = useState(null);
+  const [lng, setLng] = useState(null);
+
+  const [sqft, setSqft] = useState("");
+  const [price, setPrice] = useState("");
+  const [years, setYears] = useState(1);
+
+  const [result, setResult] = useState(null);
+  const [forecast, setForecast] = useState([]);
+
+  /* ---------- SESSION CHECK ---------- */
+  useEffect(() => {
+    fetch(API + "/me", { credentials:"include" })
+      .then(r => r.json())
+      .then(d => d.logged_in && setUser(d));
+  }, []);
+
+  /* ---------- MAP ---------- */
+  useEffect(() => {
+    if (!showMap) return;
+    setTimeout(() => {
+      const map = L.map("map").setView([22.97, 78.65], 5);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+      let marker;
+      map.on("click", e => {
+        setLat(e.latlng.lat);
+        setLng(e.latlng.lng);
+        if (marker) map.removeLayer(marker);
+        marker = L.marker(e.latlng).addTo(map);
+      });
+
+      map.invalidateSize();
+    }, 200);
+  }, [showMap]);
+
+  /* ---------- AUTH ---------- */
+  const handleAuth = async e => {
+    e.preventDefault();
+    setAuthError("");
+
+    const res = await fetch(API + (isLogin ? "/login" : "/register"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(auth)
+    });
+
+    const data = await res.json();
+    if (!res.ok) return setAuthError(data.error);
+    setUser(data);
+  };
+
+  /* ---------- LOGOUT ---------- */
+  const logout = async () => {
+    await fetch(API + "/logout", {
+      method: "POST",
+      credentials: "include"
+    });
+    setUser(null);
+    setForecast([]);
+    setResult(null);
+  };
+
+  /* ---------- PREDICT ---------- */
+  const predict = async () => {
+    try {
+      if (!lat || !lng) return alert("Select location");
+      if (!sqft || !price) return alert("Enter all fields");
+
+      const res = await fetch(API + "/predict", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sqft,
+          current_price: price,
+          years
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) return alert(data.error || "Prediction failed");
+
+      setResult(data);
+      setForecast(data.forecast || []);
+      setTimeout(() => drawChart(data.forecast || []), 0);
+
+    } catch (err) {
+      console.error(err);
+      alert("Error occurred. Check console.");
+    }
+  };
+
+  /* ---------- LOGIN / REGISTER ---------- */
+  if (!user) {
+    return (
+      <form onSubmit={handleAuth} className="max-w-md mx-auto mt-32 bg-slate-800 p-6 rounded">
+        <h2 className="text-xl mb-4">{isLogin ? "Login" : "Register"}</h2>
+
+        {authError && <div className="text-red-400 mb-2">{authError}</div>}
+
+        {!isLogin && (
+          <>
+            <input className="w-full mb-2 p-2 bg-slate-900" placeholder="First Name"
+              onChange={e=>setAuth({...auth, first_name:e.target.value})}/>
+            <input className="w-full mb-2 p-2 bg-slate-900" placeholder="Last Name"
+              onChange={e=>setAuth({...auth, last_name:e.target.value})}/>
+          </>
+        )}
+
+        <input className="w-full mb-2 p-2 bg-slate-900" placeholder="Email"
+          onChange={e=>setAuth({...auth, email:e.target.value})}/>
+        <input type="password" className="w-full mb-4 p-2 bg-slate-900" placeholder="Password"
+          onChange={e=>setAuth({...auth, password:e.target.value})}/>
+
+        <button className="w-full bg-blue-600 p-2 rounded">
+          {isLogin ? "Login" : "Register"}
+        </button>
+
+        <p className="mt-3 text-sm text-center">
+          <button type="button" onClick={()=>setIsLogin(!isLogin)} className="text-blue-400">
+            {isLogin ? "Create account" : "Back to login"}
+          </button>
+        </p>
+      </form>
+    );
+  }
+
+  /* ---------- DASHBOARD ---------- */
+  return (
+    <div className="p-8 max-w-6xl mx-auto">
+
+      {/* HEADER */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="text-lg">
+          Welcome, <span className="font-semibold">
+            {user.first_name} {user.last_name}
+          </span>
+        </div>
+        <button onClick={logout}
+          className="bg-red-600 px-4 py-2 rounded">
+          Logout
+        </button>
+      </div>
+
+      <button onClick={()=>setShowMap(true)}
+        className="bg-blue-600 px-4 py-2 rounded">
+        Select Location
+      </button>
+
+      {showMap && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center">
+          <div className="bg-slate-900 p-4 rounded w-3/4">
+            <div id="map"></div>
+            <button onClick={()=>setShowMap(false)}
+              className="mt-2 bg-green-600 px-4 py-2 rounded">
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-6 mt-6">
+        <div className="bg-slate-800 p-4 rounded">
+          <input className="w-full mb-2 p-2 bg-slate-900" placeholder="Area (sqft)"
+            onChange={e=>setSqft(e.target.value)}/>
+          <input className="w-full mb-2 p-2 bg-slate-900" placeholder="Current Price"
+            onChange={e=>setPrice(e.target.value)}/>
+          <select className="w-full mb-2 p-2 bg-slate-900"
+            onChange={e=>setYears(e.target.value)}>
+            <option value="1">1 Year</option>
+            <option value="3">3 Years</option>
+            <option value="5">5 Years</option>
+          </select>
+          <button onClick={predict}
+            className="w-full bg-green-600 p-2 rounded">
+            Predict
+          </button>
+        </div>
+
+        <div className="bg-slate-800 p-4 rounded text-center">
+          {!result ? "Result will appear here" : (
+            <>
+              <div>Current: ₹{result.current}</div>
+              <div className="text-2xl mt-2">Predicted: ₹{result.predicted}</div>
+              <div className="mt-2">{result.status} • {result.percent}%</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {forecast.length > 0 && (
+        <div className="bg-slate-800 p-4 mt-6 rounded h-64">
+          <canvas id="chart"></canvas>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
