@@ -40,3 +40,13 @@ This version uses **deterministic logic (no ML yet)** to ensure stability and cl
 
 ## 📁 Project Structure
 
+livvra/
+│
+├── backend/
+│ └── app.py
+│
+├── frontend/
+│ └── index.html
+│
+└── README.md
+
